@@ -1,0 +1,34 @@
+{
+  "entries": [
+    {
+      "id": "entry-machine-setup",
+      "title": "本机环境：ComfyUI 与工作区",
+      "content": "ComfyUI 安装在 E:\\woyao，默认端口 8188。工作区在 D:\\deepseekharness\\预设与酒馆。启动脚本见 tools\\ 目录。",
+      "constant": true,
+      "enabled": true,
+      "keys": [],
+      "repeat": "once",
+      "caseSensitive": false
+    },
+    {
+      "id": "entry-image-workflow",
+      "title": "Krea2 跑图默认工作流",
+      "content": "说「跑图」时使用默认工作流：10 步 KSamplerAdvanced + 2x RCAN，输出目录 E:\\woyao\\output。需要更高质量时改用双采样器 + 放大分支的那套。",
+      "constant": false,
+      "enabled": true,
+      "keys": ["跑图", "Krea2", "出图", "批量"],
+      "repeat": "once",
+      "caseSensitive": false
+    },
+    {
+      "id": "entry-style-preference",
+      "title": "写作偏好",
+      "content": "不要模板化的「首先/其次/最后」过渡，不要复述代码块，结论先行，少用列表。",
+      "constant": false,
+      "enabled": true,
+      "keys": ["写作", "文风", "润色"],
+      "repeat": "always",
+      "caseSensitive": false
+    }
+  ]
+}

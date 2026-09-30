@@ -1,0 +1,32 @@
+{
+  "name": "dsh-worldbook",
+  "version": "1.0.0",
+  "description": "Tavern-style world book for DeepSeek Harness (dsh): standing constant entries plus keyword-triggered entries, with a visual editor inside the web settings panel. 世界书引擎与网页编辑器。",
+  "type": "module",
+  "license": "MIT",
+  "private": false,
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "cordis",
+    "worldbook",
+    "世界书",
+    "lorebook",
+    "tavern",
+    "memory",
+    "agent",
+    "context-injection"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/OWNER/dsh-worldbook.git"
+  },
+  "homepage": "https://github.com/OWNER/dsh-worldbook#readme",
+  "bugs": {
+    "url": "https://github.com/OWNER/dsh-worldbook/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

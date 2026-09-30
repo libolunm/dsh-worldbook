@@ -1,0 +1,10 @@
+node_modules/
+pnpm-lock.yaml
+package-lock.json
+
+# live world book data and its write lock / atomic-write leftovers
+worldbook.json
+worldbook.json.bak
+worldbook.json.lock
+*.tmp
+*.bak
