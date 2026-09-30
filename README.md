@@ -167,7 +167,7 @@ preset 里的内联插件在**进程启动时**加载，装完需要重启 dsh�
 
 ## License
 
-MIT © 2026 小杨
+MIT © 2026 libolunm
 
 ---
 
