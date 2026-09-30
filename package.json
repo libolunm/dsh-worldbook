@@ -20,11 +20,11 @@
   ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/OWNER/dsh-worldbook.git"
+    "url": "git+https://github.com/libolunm/dsh-worldbook.git"
   },
-  "homepage": "https://github.com/OWNER/dsh-worldbook#readme",
+  "homepage": "https://github.com/libolunm/dsh-worldbook#readme",
   "bugs": {
-    "url": "https://github.com/OWNER/dsh-worldbook/issues"
+    "url": "https://github.com/libolunm/dsh-worldbook/issues"
   },
   "engines": {
     "node": ">=18"
