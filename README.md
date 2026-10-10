@@ -97,6 +97,7 @@ preset 里的内联插件在**进程启动时**加载，装完需要重启 dsh�
 | `caseSensitive` | boolean | 默认 `false` |
 | `repeat` | `"once"` \| `"always"` | 默认 `once` |
 | `enabled` | boolean | 默认 `true`；`false` 表示停用 |
+| `onlyProviders` | string[] | 可选；仅蓝灯条目生效，只在当前模型 provider 命中时注入 |
 
 校验是**严格**的：非法结构直接抛错，不会静默修复或丢弃未知字段。手写文件时给 `worldbook.json` 配上编辑器里的 JSON 校验，比事后猜错在哪快得多。
 
@@ -132,7 +133,7 @@ preset 里的内联插件在**进程启动时**加载，装完需要重启 dsh�
 ## 并发与安全语义
 
 - **修订号**：文件内容的 SHA-256。引擎、编辑器、以及所有协作写入者共用同一个修订号做乐观锁。
-- **写锁**：每次写盘前用 `open(path, 'wx')` 抢一个 `worldbook.json.lock`。抢不到就明确失败，绝不偷锁、绝不静默覆盖。
+- **写锁**：每次写盘前用 `open(path, 'wx')` 抢一个 `worldbook.json.lock`。抢不到就明确失败，绝不偷锁、绝不静默覆盖；超过 120 秒未被刷新的失效锁会被回收一次并重试，避免残留锁永久卡死写入。
 - **原子替换**：写临时文件 → `fsync` → `rename` 覆盖，读到的永远是完整文件。
 - **二次校验**：持锁后以及替换前各再读一次修订号，能抓到不守规矩的外部改动。
 - **编辑器 HTTP 面**：`PUT /worldbook/api` 要求同源（校验 `Origin` 与 `sec-fetch-site`）、`Content-Type: application/json`、请求体 ≤ 1 MiB；写盘前先备份 `worldbook.json.bak`；响应带 `no-store` 与 `nosniff`，编辑器页面带 CSP。
@@ -146,7 +147,7 @@ preset 里的内联插件在**进程启动时**加载，装完需要重启 dsh�
 - 关键词是**纯子串包含**，不做分词、不支持正则；`caseSensitive: false` 时两侧都转小写再比。
 - `repeat: once`：同一个 agent 内，同一**版本**的条目只注入一次。「版本」是该条目对象的 JSON 哈希 —— 条目内容被改动后，哈希变了，可以再次注入。
 - `repeat: always`：只要命中就注入。
-- 合成消息紧跟触发它的那条用户消息之后插入，`source.kind` 为 `plugin`，视觉上与用户消息区分开。
+- 合成消息紧跟触发它的那条用户消息之后插入，`source.kind` 为 `plugin:worldbook`（生产者自有，适配 session format v4），视觉上与用户消息区分开。
 - 蓝灯段与绿灯匹配都会在**每次模型调用前重读文件**，所以手改 `worldbook.json` 立即生效（除非你改的是插件配置里的路径）。
 
 ---
@@ -165,6 +166,12 @@ preset 里的内联插件在**进程启动时**加载，装完需要重启 dsh�
 
 ---
 
+## 更新日志
+
+详见 [CHANGELOG.md](./CHANGELOG.md)。
+
+---
+
 ## License
 
 MIT © 2026 libolunm
@@ -175,7 +182,7 @@ MIT © 2026 libolunm
 
 A tavern-style **world book** for DeepSeek Harness (dsh). Two halves:
 
-- `worldbook/` — the engine, mounted inside an agent preset via `agent.cordis.yml`. It renders `constant` entries as a standing system-prompt section, injects keyword-matched entries as a synthetic message on `agent/pre-step`, and registers a `worldbook` read/write tool.
+- `worldbook/` — the engine, mounted inside an agent preset via `agent.cordis.yml`. It renders `constant` entries as a standing system-prompt section (optionally gated by `onlyProviders`), injects keyword-matched entries as a synthetic message on `agent/pre-step`, and registers a `worldbook` read/write tool.
 - `worldbook-editor/` — a same-origin web editor served by the dsh web server at `/worldbook`, mounted as a settings section through the profile's `cordis.patch.yml`.
 
-Both halves share one `worldbook.json` (SHA-256 revision for optimistic locking, exclusive `.lock` file, atomic temp-write + rename). Path resolution: `config.path` → `DSH_WORLDBOOK_PATH` → `~/.dsh/.agent-presets/tavern/worldbook.json`. MIT licensed.
+Both halves share one `worldbook.json` (SHA-256 revision for optimistic locking, exclusive `.lock` file with stale-lock reclaim, atomic temp-write + rename). Path resolution: `config.path` → `DSH_WORLDBOOK_PATH` → `~/.dsh/.agent-presets/tavern/worldbook.json`. MIT licensed.

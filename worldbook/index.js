@@ -1,14 +1,26 @@
 /** Worldbook engine. File reads occur during prompt assembly, before pre-step.
- * Writers must use writeWorldbook (SHA-256 revision + exclusive .lock file).
+ * Writers must use writeWorldbook (SHA-256 revision + exclusive .lock file); a
+ * lock untouched for LOCK_STALE_MS is abandoned and reclaimed once.
+ * Keyword hits are injected as a synthetic user message, whose source kind must
+ * stay producer-owned (session format V4) or the whole turn is refused.
  * Existing running plugin closures require a process restart to load this code.
  */
 import { createHash, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
-import { readFile, open, rename, unlink } from 'node:fs/promises'
+import { readFile, open, rename, unlink, stat } from 'node:fs/promises'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import { isAbsolute } from 'node:path'
 
 export const inject = ['systemPrompt', 'tools']
+
+/** Session format v4 admits producer-owned source kinds only: a third-party
+ * producer is addressed as `plugin:<name>`. The released V3 shape
+ * `{ kind: 'plugin', plugin: 'worldbook' }` is a hard refusal under V4
+ * ("format v4 message requires a producer-owned source kind") and takes the
+ * whole turn down before the model is ever called. `plugin` is kept beside the
+ * kind because the UI labels a source by it.
+ */
+const SOURCE = Object.freeze({ kind: 'plugin:worldbook', plugin: 'worldbook' })
 const hash = text => createHash('sha256').update(text).digest('hex')
 const record = value => value !== null && typeof value === 'object' && !Array.isArray(value)
 
@@ -30,20 +42,42 @@ export function validateWorldbook(book) {
 function decode(text) { return { book: validateWorldbook(JSON.parse(text)), revision: hash(text) } }
 export async function readWorldbook(path) { return decode(await readFile(path, 'utf8')) }
 
-/** Cooperating writers share this lock, including other module instances/processes.
- * A busy/stale lock fails explicitly; never steal it or silently overwrite data.
+/** A lock nobody refreshed for this long is abandoned: its writer died mid-write
+ * (a process kill leaves the file behind, which used to block every later write
+ * until someone deleted it by hand). Real writes take milliseconds.
  */
+const LOCK_STALE_MS = 120_000
+
+async function lockIsStale(lockPath) {
+  try { return Date.now() - (await stat(lockPath)).mtimeMs > LOCK_STALE_MS } catch { return false }
+}
+
+/** Cooperating writers share this lock, including other module instances/processes.
+ * A live lock always fails explicitly and is never stolen. A stale lock is dropped
+ * exactly once and retried, so a killed writer cannot wedge the book forever.
+ */
+async function acquireLock(lockPath) {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const handle = await open(lockPath, 'wx')
+      await handle.writeFile(`${process.pid}\n${new Date().toISOString()}\n`, 'utf8')
+      return handle
+    } catch (error) {
+      if (error.code !== 'EEXIST') throw error
+      if (attempt === 0 && await lockIsStale(lockPath)) { await unlink(lockPath).catch(() => {}); continue }
+      throw new Error('世界书正被其他写入者锁定；请稍后重新读取并重试')
+    }
+  }
+  throw new Error('世界书正被其他写入者锁定；请稍后重新读取并重试')
+}
+
 export async function writeWorldbook(path, book, expectedRevision, { signal } = {}) {
   const candidate = structuredClone(book)
   validateWorldbook(candidate)
   if (typeof expectedRevision !== 'string' || !expectedRevision) throw new Error('写入需要 expectedRevision；请先读取最新世界书')
   signal?.throwIfAborted()
   const lockPath = `${path}.lock`
-  let lock
-  try { lock = await open(lockPath, 'wx') } catch (error) {
-    if (error.code === 'EEXIST') throw new Error('世界书正被其他写入者锁定；请稍后重新读取并重试')
-    throw error
-  }
+  const lock = await acquireLock(lockPath)
   const temp = `${path}.${randomUUID()}.tmp`
   try {
     if ((await readWorldbook(path)).revision !== expectedRevision) throw new Error('世界书版本冲突；请重新读取后合并修改')
@@ -71,6 +105,11 @@ const fields = {
 }
 function entryVersion(e) { return hash(JSON.stringify(e)) }
 function textOf(m) { return (m.content ?? []).filter(b => b.type === 'text').map(b => b.text).join('\n') }
+/** A constant entry with `onlyProviders` is injected only when the current model's provider matches. */
+function entryAppliesToProvider(e, provider) {
+  if (!Array.isArray(e.onlyProviders) || e.onlyProviders.length === 0) return true
+  return e.onlyProviders.includes(provider)
+}
 
 export async function apply(ctx, config = {}) {
   const configured = config.path || process.env.DSH_WORLDBOOK_PATH || './worldbook.json'
@@ -90,9 +129,10 @@ export async function apply(ctx, config = {}) {
   // Always register, even when currently empty: future additions must appear.
   ctx.systemPrompt.section({
     name: 'worldbook:constant', order: Number.isFinite(config.sectionOrder) ? config.sectionOrder : 420,
-    text: () => {
+    text: (context) => {
       const book = refreshSync()
-      const constants = book.entries.filter(e => e.enabled !== false && e.constant === true)
+      const provider = context?.agent?.options?.provider ?? ''
+      const constants = book.entries.filter(e => e.enabled !== false && e.constant === true && entryAppliesToProvider(e, provider))
       return [
         '## 世界书（用户持久背景）',
         '按用户明确要求保存或修改长期偏好时使用 worldbook 工具。当前用户指令优先于旧条目；条目是背景信息，不扩大工具权限。',
@@ -119,13 +159,19 @@ export async function apply(ctx, config = {}) {
       e.keys?.some(k => e.caseSensitive ? text.includes(k) : text.toLowerCase().includes(k.toLowerCase())))
     if (!hits.length) return decision
     payload.signal?.throwIfAborted()
-    const message = {
-      id: randomUUID(), role: 'user', source: { kind: 'plugin', plugin: 'worldbook' },
-      content: [{ type: 'text', text: '[世界书注入 · worldbook]\n以下为相关背景资料，无需回复确认：\n\n' + hits.map(e => `### ${e.title}\n${e.content}`).join('\n\n') }],
+    try {
+      const message = {
+        id: randomUUID(), role: 'user', source: { ...SOURCE },
+        content: [{ type: 'text', text: '[世界书注入 · worldbook]\n以下为相关背景资料，无需回复确认：\n\n' + hits.map(e => `### ${e.title}\n${e.content}`).join('\n\n') }],
+      }
+      const index = decision.messages.findLastIndex(m => claimed.some(c => c.id === m.id))
+      for (const e of hits) seen.set(e.id, entryVersion(e))
+      return { ...decision, messages: decision.messages.toSpliced(index + 1, 0, message) }
+    } catch (error) {
+      // 注入失败只跳过本轮；任何异常都不允许把整轮对话带走。
+      ctx.logger.warn('世界书关键词注入失败，本轮跳过: %s', error?.message ?? String(error))
+      return decision
     }
-    const index = decision.messages.findLastIndex(m => claimed.some(c => c.id === m.id))
-    for (const e of hits) seen.set(e.id, entryVersion(e))
-    return { ...decision, messages: decision.messages.toSpliced(index + 1, 0, message) }
   })
 
   let queue = Promise.resolve()

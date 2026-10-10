@@ -1,6 +1,6 @@
 {
   "name": "dsh-worldbook",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Tavern-style world book for DeepSeek Harness (dsh): standing constant entries plus keyword-triggered entries, with a visual editor inside the web settings panel. 世界书引擎与网页编辑器。",
   "type": "module",
   "license": "MIT",
